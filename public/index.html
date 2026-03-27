@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>API HOP</title>
+<style>
+body{background:#0f0f0f;color:#fff;font-family:sans-serif}
+.box{background:#1c1c1c;padding:15px;margin:10px;border-radius:10px}
+input,button,textarea{margin:5px;padding:8px;border-radius:6px;border:none}
+button{background:#5865f2;color:#fff;cursor:pointer}
+pre{background:#000;padding:10px;border-radius:6px}
+</style>
+</head>
+<body>
+
+<div class="box">
+<h3>Tạo API</h3>
+<input id="name" placeholder="tên api">
+<button onclick="create()">Tạo</button>
+<pre id="link"></pre>
+</div>
+
+<div class="box">
+<h3>Settings</h3>
+<textarea id="map" placeholder='{"1":"t","2":"r"}'></textarea><br>
+<input id="ttl" placeholder="ttl ms vd 60000"><br>
+<button onclick="set()">Save</button>
+</div>
+
+<div class="box">
+<h3>Xem jobs</h3>
+<button onclick="load()">Load</button>
+<pre id="out"></pre>
+</div>
+
+<script>
+let cur=""
+
+async function create(){
+  let name=document.getElementById("name").value
+  let r=await fetch("/create",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({name})})
+  let j=await r.json()
+  cur=name
+  document.getElementById("link").innerText=location.origin+j.api
+}
+
+async function set(){
+  let map=JSON.parse(document.getElementById("map").value||"{}")
+  let ttl=parseInt(document.getElementById("ttl").value)
+  await fetch("/set",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({name:cur,map,ttl})})
+}
+
+async function load(){
+  let r=await fetch("/api/"+cur)
+  let j=await r.json()
+  document.getElementById("out").innerText=JSON.stringify(j,null,2)
+}
+</script>
+
+</body>
+</html>
