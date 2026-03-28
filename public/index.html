@@ -9,9 +9,14 @@ body{background:#0f0f0f;color:#fff;font-family:sans-serif}
 input,button,textarea{margin:5px;padding:8px;border-radius:6px;border:none}
 button{background:#5865f2;color:#fff;cursor:pointer}
 pre{background:#000;padding:10px;border-radius:6px;max-height:200px;overflow:auto}
+.top{position:fixed;top:10px;right:10px}
 </style>
 </head>
 <body>
+
+<div class="top">
+<button onclick="showAuth()">⚙️</button>
+</div>
 
 <div class="box">
 <h3>create api</h3>
@@ -41,36 +46,112 @@ pre{background:#000;padding:10px;border-radius:6px;max-height:200px;overflow:aut
 <pre id="out"></pre>
 </div>
 
-<div class="box">
-<h3>Owner</h3>
-<input id="token" placeholder="owner token">
+<div class="box" id="ownerBox" style="display:none">
+<h3>OWNER PANEL</h3>
 <button onclick="owner()">Load</button>
 <pre id="own"></pre>
 </div>
 
+<div class="box" id="authBox" style="display:none">
+<h3>Auth</h3>
+<input id="user" placeholder="user">
+<input id="pass" placeholder="pass">
+<br>
+<button onclick="register()">Register</button>
+<button onclick="login()">Login</button>
+<button onclick="logout()">Logout</button>
+<pre id="authOut"></pre>
+</div>
+
 <script>
-let cur=""
+let token = localStorage.getItem("token") || ""
+let role = localStorage.getItem("role") || ""
+
+function showAuth(){
+  authBox.style.display = authBox.style.display=="none"?"block":"none"
+}
+
+function saveAuth(tk, rl){
+  token = tk
+  role = rl
+  localStorage.setItem("token", tk)
+  localStorage.setItem("role", rl)
+
+  if(role=="owner") ownerBox.style.display="block"
+}
+
+function logout(){
+  localStorage.clear()
+  token=""
+  role=""
+  ownerBox.style.display="none"
+}
+
+async function register(){
+  let r = await fetch("/register",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    user:user.value,pass:pass.value
+  })})
+  authOut.innerText = await r.text()
+}
+
+async function login(){
+  let r = await fetch("/login",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    user:user.value,pass:pass.value
+  })})
+  let j = await r.json()
+  if(j.token){
+    saveAuth(j.token, j.role)
+    authOut.innerText="OK"
+  }else authOut.innerText=JSON.stringify(j)
+}
 
 async function create(){
   let name=document.getElementById("name").value
+
   let r=await fetch("/create",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({name})})
   let j=await r.json()
-  cur=name
-  link.innerText=location.origin+j.api
+
+  if(j.link){
+    let full = location.origin + j.link
+    link.innerHTML = `
+${full}
+<button onclick="navigator.clipboard.writeText('${full}')">COPY</button>
+`
+  }else{
+    link.innerText = JSON.stringify(j)
+  }
 }
 
 async function loadApis(){
-  let r=await fetch("/my")
+  let r=await fetch("/owner",{headers:{authorization:token}})
   let j=await r.json()
-  list.innerText=j.join("\n")
+
+  if(role=="owner"){
+    list.innerText = Object.keys(j.apis).join("\n")
+  }else{
+    list.innerText = "IP mode only (no list API)"
+  }
 }
 
 async function saveSet(){
   let name=setName.value
-  let map=JSON.parse(setMap.value||"{}")
-  let ttl=parseInt(setTTL.value)
+  let encodeMap
 
-  await fetch("/set",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({name,map,ttl})})
+  try{
+    encodeMap = JSON.parse(setMap.value||"{}")
+  }catch{
+    return alert("map lỗi")
+  }
+
+  let ttl = parseInt(setTTL.value)*1000
+
+  let r = await fetch("/settings",{
+    method:"POST",
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name,encodeMap,ttl})
+  })
+
+  alert(await r.text())
 }
 
 async function load(){
@@ -81,11 +162,13 @@ async function load(){
 }
 
 async function owner(){
-  let t=token.value
-  let r=await fetch("/owner",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t})})
+  let r=await fetch("/owner",{headers:{authorization:token}})
   let j=await r.json()
   own.innerText=JSON.stringify(j,null,2)
 }
+
+// auto load owner UI
+if(role=="owner") ownerBox.style.display="block"
 </script>
 
 </body>
