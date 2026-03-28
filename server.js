@@ -16,13 +16,25 @@ const DB = {
 
 const getIP = req => (req.headers["x-forwarded-for"]||"").split(",")[0] || req.socket.remoteAddress
 
-function encode(str,map){
-  if(!map) return str
-  return str.split("").map(c=>map[c]||c).join("")
+const encode = (str,map)=> map ? str.split("").map(c=>map[c]||c).join("") : str
+
+const genToken = ()=>Math.random().toString(36).slice(2)
+const genID = ()=>Math.random().toString(36).slice(2)
+
+const genGuest = ip => "Khach"+(ip.replace(/\D/g,"").slice(-5)||Math.floor(Math.random()*99999))
+
+const parseText = txt=>{
+  let o={}
+  txt.split("\n").forEach(l=>{
+    let [k,v]=l.split("=")
+    if(k&&v) o[k.trim()]=v.trim()
+  })
+  return o
 }
 
-function genToken(){
-  return Math.random().toString(36).slice(2)
+const getUser = req=>{
+  let tk=req.headers.authorization
+  return DB.sessions[tk]
 }
 
 app.post("/register",(req,res)=>{
@@ -50,40 +62,54 @@ app.post("/login",(req,res)=>{
   res.json({token:tk,role:"user"})
 })
 
+app.get("/me",(req,res)=>{
+  let u=getUser(req)
+  if(u) return res.json({user:u})
+  res.json({guest:genGuest(getIP(req))})
+})
+
 app.post("/create",(req,res)=>{
   let {name}=req.body
-  let ip=getIP(req)
+  let user=getUser(req)
 
+  if(!user) return res.json({err:"login"})
   if(!name) return res.json({err:"no name"})
-  if(DB.apis[name]) return res.json({err:"exist"})
+  if(/[^\w]/.test(name)) return res.json({err:"invalid"})
 
-  DB.apis[name]={
+  let id=genID()
+
+  DB.apis[id]={
+    id,
+    name,
+    owner:user,
     jobs:[],
     encode:null,
-    ttl:60000,
-    ownerIP:ip
+    ttl:60000
   }
 
-  res.json({ok:1,link:`/api/${encodeURIComponent(name)}`})
+  res.json({ok:1,id,link:`/api/${id}`})
+})
+
+app.get("/my",(req,res)=>{
+  let user=getUser(req)
+  if(!user) return res.json([])
+
+  res.json(Object.values(DB.apis).filter(a=>a.owner===user))
 })
 
 app.post("/push",(req,res)=>{
-  let {name,job,ms,mx,players,sea}=req.body
-  let api=DB.apis[name]
+  let {id,job,ms,mx,players,sea}=req.body
+  let api=DB.apis[id]
   if(!api) return res.json({err:"no api"})
 
   job=encode(job,api.encode)
 
-  api.jobs.push({
-    job,ms,mx,players,sea,
-    t:Date.now()
-  })
-
+  api.jobs.push({job,ms,mx,players,sea,t:Date.now()})
   res.json({ok:1})
 })
 
-app.get("/api/:name",(req,res)=>{
-  let api=DB.apis[req.params.name]
+app.get("/api/:id",(req,res)=>{
+  let api=DB.apis[req.params.id]
   if(!api) return res.json([])
 
   let now=Date.now()
@@ -93,14 +119,14 @@ app.get("/api/:name",(req,res)=>{
 })
 
 app.post("/settings",(req,res)=>{
-  let {name,encodeMap,ttl}=req.body
-  let api=DB.apis[name]
-  let ip=getIP(req)
+  let {id,encodeText,ttl}=req.body
+  let user=getUser(req)
 
+  let api=DB.apis[id]
   if(!api) return res.json({err:"no api"})
-  if(api.ownerIP!==ip) return res.json({err:"not owner"})
+  if(api.owner!==user) return res.json({err:"no perm"})
 
-  if(encodeMap) api.encode=encodeMap
+  if(encodeText) api.encode=parseText(encodeText)
   if(ttl) api.ttl=ttl
 
   res.json({ok:1})
@@ -120,11 +146,11 @@ app.post("/owner/edit",(req,res)=>{
   let tk=req.headers.authorization
   if(DB.sessions[tk]!=="OWNER") return res.json({err:"no"})
 
-  let {name,encodeMap,ttl}=req.body
-  let api=DB.apis[name]
+  let {id,encodeText,ttl}=req.body
+  let api=DB.apis[id]
   if(!api) return res.json({err:"no api"})
 
-  if(encodeMap) api.encode=encodeMap
+  if(encodeText) api.encode=parseText(encodeText)
   if(ttl) api.ttl=ttl
 
   res.json({ok:1})
