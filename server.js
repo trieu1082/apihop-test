@@ -4,111 +4,130 @@ const app = express()
 app.use(express.json())
 app.use(express.static("public"))
 
-const OWNER = process.env.OWNER_TOKEN || "dev"
+const PORT = process.env.PORT || 3000
+const OWNER_TOKEN = process.env.OWNER_TOKEN
+if(!OWNER_TOKEN) throw "missing OWNER_TOKEN"
 
-let apis = {}
-let owners = {}
-
-const getIP = req => req.headers["x-forwarded-for"] || req.socket.remoteAddress
-
-// encode chuẩn (fix đè)
-const enc = (s,m)=>{
-  let keys = Object.keys(m).sort((a,b)=>b.length-a.length)
-  for(let k of keys){
-    s = s.split(k).join(m[k])
-  }
-  return s
+const DB = {
+  apis:{},
+  users:{},
+  sessions:{}
 }
 
-const clean = a=>{
-  let now = Date.now()
-  a.jobs = a.jobs.filter(j => now - j.t < a.ttl)
+const getIP = req => (req.headers["x-forwarded-for"]||"").split(",")[0] || req.socket.remoteAddress
+
+function encode(str,map){
+  if(!map) return str
+  return str.split("").map(c=>map[c]||c).join("")
 }
 
-// auto clean
-setInterval(()=>{
-  for(let k in apis){
-    clean(apis[k])
-  }
-},5000)
+function genToken(){
+  return Math.random().toString(36).slice(2)
+}
 
-// CREATE API
-app.post("/create",(req,res)=>{
-  let {name} = req.body
-  let ip = getIP(req)
-
-  if(!name) return res.json({err:"no name"})
-  if(apis[name]) return res.json({err:"exist"})
-
-  apis[name] = {
-    map:{},
-    jobs:[],
-    ttl:60000,
-    owner:ip
-  }
-
-  if(!owners[ip]) owners[ip]=[]
-  owners[ip].push(name)
-
-  res.json({api:`/api/${name}`})
-})
-
-// SETTINGS
-app.post("/set",(req,res)=>{
-  let {name,map,ttl} = req.body
-  let a = apis[name]
-
-  if(!a) return res.json({err:"no api"})
-
-  if(map) a.map = map
-  if(ttl) a.ttl = ttl * 1000
-
+app.post("/register",(req,res)=>{
+  let {user,pass}=req.body
+  if(!user||!pass) return res.json({err:"missing"})
+  if(DB.users[user]) return res.json({err:"exist"})
+  DB.users[user]={pass}
   res.json({ok:1})
 })
 
-// PUSH JOB
+app.post("/login",(req,res)=>{
+  let {user,pass}=req.body
+
+  if(user==="owner" && pass===OWNER_TOKEN){
+    let tk=genToken()
+    DB.sessions[tk]="OWNER"
+    return res.json({token:tk,role:"owner"})
+  }
+
+  let u=DB.users[user]
+  if(!u||u.pass!==pass) return res.json({err:"wrong"})
+
+  let tk=genToken()
+  DB.sessions[tk]=user
+  res.json({token:tk,role:"user"})
+})
+
+app.post("/create",(req,res)=>{
+  let {name}=req.body
+  let ip=getIP(req)
+
+  if(!name) return res.json({err:"no name"})
+  if(DB.apis[name]) return res.json({err:"exist"})
+
+  DB.apis[name]={
+    jobs:[],
+    encode:null,
+    ttl:60000,
+    ownerIP:ip
+  }
+
+  res.json({ok:1,link:`/api/${encodeURIComponent(name)}`})
+})
+
 app.post("/push",(req,res)=>{
-  let {name,job,ms,mx,p,sea,players} = req.body
-  let a = apis[name]
+  let {name,job,ms,mx,players,sea}=req.body
+  let api=DB.apis[name]
+  if(!api) return res.json({err:"no api"})
 
-  if(!a) return res.json({err:"no api"})
+  job=encode(job,api.encode)
 
-  let encoded = enc(job,a.map)
-
-  // tránh trùng
-  if(a.jobs.find(x=>x.job===encoded)) return res.json({ok:1})
-
-  a.jobs.push({
-    job:encoded,
-    ms,mx,p,sea,players,
+  api.jobs.push({
+    job,ms,mx,players,sea,
     t:Date.now()
   })
 
-  clean(a)
   res.json({ok:1})
 })
 
-// GET API
-app.get("/api/:n",(req,res)=>{
-  let a = apis[req.params.n]
-  if(!a) return res.json([])
+app.get("/api/:name",(req,res)=>{
+  let api=DB.apis[req.params.name]
+  if(!api) return res.json([])
 
-  clean(a)
-  res.json(a.jobs)
+  let now=Date.now()
+  api.jobs=api.jobs.filter(j=>now-j.t<api.ttl)
+
+  res.json(api.jobs)
 })
 
-// MY API (theo IP)
-app.get("/my",(req,res)=>{
-  let ip = getIP(req)
-  res.json(owners[ip] || [])
+app.post("/settings",(req,res)=>{
+  let {name,encodeMap,ttl}=req.body
+  let api=DB.apis[name]
+  let ip=getIP(req)
+
+  if(!api) return res.json({err:"no api"})
+  if(api.ownerIP!==ip) return res.json({err:"not owner"})
+
+  if(encodeMap) api.encode=encodeMap
+  if(ttl) api.ttl=ttl
+
+  res.json({ok:1})
 })
 
-// OWNER PANEL
-app.post("/owner",(req,res)=>{
-  let {token} = req.body
-  if(token !== OWNER) return res.json({err:"nope"})
+app.get("/owner",(req,res)=>{
+  let tk=req.headers.authorization
+  if(DB.sessions[tk]!=="OWNER") return res.json({err:"no"})
 
-  res.json(apis)
+  res.json({
+    users:DB.users,
+    apis:DB.apis
+  })
 })
 
-app.listen(process.env.PORT || 3000)
+app.post("/owner/edit",(req,res)=>{
+  let tk=req.headers.authorization
+  if(DB.sessions[tk]!=="OWNER") return res.json({err:"no"})
+
+  let {name,encodeMap,ttl}=req.body
+  let api=DB.apis[name]
+  if(!api) return res.json({err:"no api"})
+
+  if(encodeMap) api.encode=encodeMap
+  if(ttl) api.ttl=ttl
+
+  res.json({ok:1})
+})
+
+app.listen(PORT,()=>console.log("run",PORT))
