@@ -14,27 +14,36 @@ const DB = {
   sessions:{}
 }
 
-const getIP = req => (req.headers["x-forwarded-for"]||"").split(",")[0] || req.socket.remoteAddress
-
-const encode = (str,map)=> map ? str.split("").map(c=>map[c]||c).join("") : str
-
+const encode = (s,m)=>m?s.split("").map(c=>m[c]||c).join(""):s
 const genToken = ()=>Math.random().toString(36).slice(2)
 const genID = ()=>Math.random().toString(36).slice(2)
 
+const getIP = r => (r.headers["x-forwarded-for"]||"").split(",")[0] || r.socket.remoteAddress
+
 const genGuest = ip => "Khach"+(ip.replace(/\D/g,"").slice(-5)||Math.floor(Math.random()*99999))
 
-const parseText = txt=>{
+const parseText = t=>{
   let o={}
-  txt.split("\n").forEach(l=>{
+  t.split("\n").forEach(l=>{
     let [k,v]=l.split("=")
-    if(k&&v) o[k.trim()]=v.trim()
+    if(k&&v)o[k.trim()]=v.trim()
   })
   return o
 }
 
-const getUser = req=>{
-  let tk=req.headers.authorization
+const getSession = r=>{
+  let tk=r.headers.authorization
   return DB.sessions[tk]
+}
+
+const getUser = r=>{
+  let s=getSession(r)
+  return s?.user
+}
+
+const isOwner = r=>{
+  let s=getSession(r)
+  return s?.role==="OWNER"
 }
 
 app.post("/register",(req,res)=>{
@@ -48,9 +57,9 @@ app.post("/register",(req,res)=>{
 app.post("/login",(req,res)=>{
   let {user,pass}=req.body
 
-  if(user==="owner" && pass===OWNER_TOKEN){
+  if(pass===OWNER_TOKEN){
     let tk=genToken()
-    DB.sessions[tk]="OWNER"
+    DB.sessions[tk]={user,role:"OWNER"}
     return res.json({token:tk,role:"owner"})
   }
 
@@ -58,13 +67,13 @@ app.post("/login",(req,res)=>{
   if(!u||u.pass!==pass) return res.json({err:"wrong"})
 
   let tk=genToken()
-  DB.sessions[tk]=user
+  DB.sessions[tk]={user,role:"user"}
   res.json({token:tk,role:"user"})
 })
 
 app.get("/me",(req,res)=>{
-  let u=getUser(req)
-  if(u) return res.json({user:u})
+  let s=getSession(req)
+  if(s) return res.json({user:s.user,role:s.role})
   res.json({guest:genGuest(getIP(req))})
 })
 
@@ -133,18 +142,12 @@ app.post("/settings",(req,res)=>{
 })
 
 app.get("/owner",(req,res)=>{
-  let tk=req.headers.authorization
-  if(DB.sessions[tk]!=="OWNER") return res.json({err:"no"})
-
-  res.json({
-    users:DB.users,
-    apis:DB.apis
-  })
+  if(!isOwner(req)) return res.json({err:"no"})
+  res.json({users:DB.users,apis:DB.apis})
 })
 
 app.post("/owner/edit",(req,res)=>{
-  let tk=req.headers.authorization
-  if(DB.sessions[tk]!=="OWNER") return res.json({err:"no"})
+  if(!isOwner(req)) return res.json({err:"no"})
 
   let {id,encodeText,ttl}=req.body
   let api=DB.apis[id]
