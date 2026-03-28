@@ -12,6 +12,7 @@ button{background:#5865f2;color:#fff;cursor:pointer}
 pre{background:#000;padding:12px;border-radius:8px;max-height:250px;overflow:auto}
 .top{position:fixed;top:10px;right:10px}
 .apiBtn{display:block;width:100%;text-align:left;margin:5px 0;background:#2a2a2a}
+.active{background:#3a3aff}
 </style>
 </head>
 <body>
@@ -23,7 +24,7 @@ pre{background:#000;padding:12px;border-radius:8px;max-height:250px;overflow:aut
 
 <div class="box">
 <h3>create api</h3>
-<input id="name" placeholder="name (no dấu)">
+<input id="name" placeholder="name">
 <button onclick="create()">Tạo</button>
 <pre id="link"></pre>
 </div>
@@ -38,7 +39,7 @@ pre{background:#000;padding:12px;border-radius:8px;max-height:250px;overflow:aut
 <h3>Settings API</h3>
 <input id="setID" placeholder="api id">
 <textarea id="setMap" placeholder="1 = a&#10;2 = b"></textarea>
-<input id="setTTL" placeholder="seconds vd 60">
+<input id="setTTL" placeholder="seconds">
 <button onclick="saveSet()">Save</button>
 </div>
 
@@ -69,116 +70,112 @@ pre{background:#000;padding:12px;border-radius:8px;max-height:250px;overflow:aut
 <script>
 let token = localStorage.getItem("token") || ""
 let role = localStorage.getItem("role") || ""
+let currentAPI = null
+
+const h = (url,opt={})=>fetch(url,{
+  ...opt,
+  headers:{'Content-Type':'application/json',authorization:token,...(opt.headers||{})}
+}).then(r=>r.json())
 
 function showAuth(){
   authBox.style.display = authBox.style.display=="none"?"block":"none"
 }
 
 function saveAuth(tk, rl){
-  token = tk
-  role = rl
-  localStorage.setItem("token", tk)
-  localStorage.setItem("role", rl)
-  if(role=="owner") ownerBox.style.display="block"
+  token=tk; role=rl
+  localStorage.setItem("token",tk)
+  localStorage.setItem("role",rl)
+  ownerBox.style.display = rl=="owner"?"block":"none"
   loadMe()
 }
 
 function logout(){
   localStorage.clear()
-  token=""
-  role=""
+  token=""; role=""
   ownerBox.style.display="none"
   loadMe()
 }
 
 async function loadMe(){
-  let r=await fetch("/me",{headers:{authorization:token}})
-  let j=await r.json()
-  me.innerText = j.user ? j.user : j.guest
+  let j=await h("/me",{method:"GET"})
+  me.innerText=j.user||j.guest
 }
 
 async function register(){
-  let r = await fetch("/register",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+  authOut.innerText=JSON.stringify(await h("/register",{method:"POST",body:JSON.stringify({
     user:user.value,pass:pass.value
-  })})
-  authOut.innerText = await r.text()
+  })}))
 }
 
 async function login(){
-  let r = await fetch("/login",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({
+  let j=await h("/login",{method:"POST",body:JSON.stringify({
     user:user.value,pass:pass.value
   })})
-  let j = await r.json()
-  if(j.token){
-    saveAuth(j.token, j.role)
-    authOut.innerText="OK"
-  }else authOut.innerText=JSON.stringify(j)
+  if(j.token){saveAuth(j.token,j.role);authOut.innerText="OK"}
+  else authOut.innerText=JSON.stringify(j)
 }
 
 async function create(){
-  let name=name.value
-
-  let r=await fetch("/create",{
-    method:"POST",
-    headers:{'Content-Type':'application/json',authorization:token},
-    body:JSON.stringify({name})
-  })
-  let j=await r.json()
-
+  let j=await h("/create",{method:"POST",body:JSON.stringify({name:name.value})})
   if(j.id){
-    let full = location.origin + "/api/" + j.id
-    link.innerHTML = `
-${full}
-<button onclick="navigator.clipboard.writeText('${full}')">COPY</button>
-`
+    let full=location.origin+"/api/"+j.id
+    link.innerHTML=`${full}
+<button onclick="navigator.clipboard.writeText('${full}')">COPY</button>`
+    loadApis()
   }else link.innerText=JSON.stringify(j)
 }
 
 async function loadApis(){
-  let r=await fetch("/my",{headers:{authorization:token}})
-  let j=await r.json()
-
+  let j=await h("/my")
   list.innerHTML=""
   j.forEach(a=>{
     let b=document.createElement("button")
     b.className="apiBtn"
-    b.innerText = a.name+" | "+a.id
-    b.onclick=()=>{
-      setID.value=a.id
-      viewID.value=a.id
-    }
+    b.innerText=a.name+" | "+a.id
+    b.onclick=()=>selectAPI(a,b)
     list.appendChild(b)
   })
 }
 
+function selectAPI(a,btn){
+  [...list.children].forEach(b=>b.classList.remove("active"))
+  btn.classList.add("active")
+
+  currentAPI=a
+
+  setID.value=a.id
+  viewID.value=a.id
+
+  setTTL.value = (a.ttl||60000)/1000
+
+  if(a.encode){
+    setMap.value = Object.entries(a.encode).map(([k,v])=>`${k} = ${v}`).join("\n")
+  }else setMap.value=""
+
+  load()
+}
+
 async function saveSet(){
-  let id=setID.value
-  let ttl=parseInt(setTTL.value)*1000
+  if(!setID.value) return alert("no id")
 
-  let r = await fetch("/settings",{
-    method:"POST",
-    headers:{'Content-Type':'application/json',authorization:token},
-    body:JSON.stringify({
-      id,
-      encodeText:setMap.value,
-      ttl
-    })
-  })
+  let j=await h("/settings",{method:"POST",body:JSON.stringify({
+    id:setID.value,
+    encodeText:setMap.value,
+    ttl:parseInt(setTTL.value||60)*1000
+  })})
 
-  alert(await r.text())
+  alert(JSON.stringify(j))
+  loadApis()
 }
 
 async function load(){
-  let n=viewID.value
-  let r=await fetch("/api/"+n)
-  let j=await r.json()
+  if(!viewID.value) return
+  let j=await fetch("/api/"+viewID.value).then(r=>r.json())
   out.innerText=JSON.stringify(j,null,2)
 }
 
 async function owner(){
-  let r=await fetch("/owner",{headers:{authorization:token}})
-  let j=await r.json()
-  own.innerText=JSON.stringify(j,null,2)
+  own.innerText=JSON.stringify(await h("/owner"),null,2)
 }
 
 if(role=="owner") ownerBox.style.display="block"
