@@ -10,7 +10,12 @@ if(!OWNER_TOKEN) throw "missing OWNER_TOKEN"
 
 const DB = {apis:{},users:{},sessions:{}}
 
-const encode = (s,m)=>m?s.split("").map(c=>m[c]||c).join(""):s
+const encode = (s,m)=>{
+  if(!m) return s
+  s = String(s)
+  return s.split("").map(c=>m[c]||c).join("")
+}
+
 const genToken = ()=>Math.random().toString(36).slice(2)
 const genID = ()=>Math.random().toString(36).slice(2)
 
@@ -90,13 +95,23 @@ app.get("/my",(req,res)=>{
 })
 
 app.post("/push",(req,res)=>{
-  let {id,job,ms,mx,players,sea}=req.body
+  let {id,job,players,sea,boss}=req.body
   let api=DB.apis[id]
+
   if(!api) return res.json({err:"no api"})
   if(!job) return res.json({err:"no job"})
+  if(!boss) return res.json({err:"no boss"})
 
-  job=encode(job,api.encode)
-  api.jobs.push({job,ms,mx,players,sea,t:Date.now()})
+  job = encode(job, api.encode)
+  boss = boss.toLowerCase()
+
+  api.jobs.push({
+    job,
+    players,
+    sea,
+    boss,
+    t: Date.now()
+  })
 
   res.json({ok:1})
 })
@@ -106,9 +121,15 @@ app.get("/api/:id",(req,res)=>{
   if(!api) return res.json([])
 
   let now=Date.now()
-  api.jobs=api.jobs.filter(j=>now-j.t<api.ttl)
+  let boss=req.query.boss
 
-  res.json(api.jobs)
+  api.jobs = api.jobs.filter(j=>now-j.t<api.ttl)
+
+  let out = boss
+    ? api.jobs.filter(j=>j.boss===boss.toLowerCase())
+    : api.jobs
+
+  res.json(out)
 })
 
 app.post("/settings",(req,res)=>{
