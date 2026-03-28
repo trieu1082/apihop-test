@@ -4,23 +4,26 @@
 <meta charset="UTF-8">
 <title>API HOP</title>
 <style>
-body{background:#0f0f0f;color:#fff;font-family:sans-serif}
-.box{background:#1c1c1c;padding:15px;margin:10px;border-radius:10px}
-input,button,textarea{margin:5px;padding:8px;border-radius:6px;border:none}
+body{background:#0f0f0f;color:#fff;font-family:sans-serif;font-size:16px}
+.box{background:#1c1c1c;padding:20px;margin:15px;border-radius:12px}
+input,button,textarea{margin:6px;padding:12px;border-radius:8px;border:none;font-size:15px}
+textarea{width:100%;height:120px}
 button{background:#5865f2;color:#fff;cursor:pointer}
-pre{background:#000;padding:10px;border-radius:6px;max-height:200px;overflow:auto}
+pre{background:#000;padding:12px;border-radius:8px;max-height:250px;overflow:auto}
 .top{position:fixed;top:10px;right:10px}
+.apiBtn{display:block;width:100%;text-align:left;margin:5px 0;background:#2a2a2a}
 </style>
 </head>
 <body>
 
 <div class="top">
+<span id="me"></span>
 <button onclick="showAuth()">⚙️</button>
 </div>
 
 <div class="box">
 <h3>create api</h3>
-<input id="name" placeholder="name">
+<input id="name" placeholder="name (no dấu)">
 <button onclick="create()">Tạo</button>
 <pre id="link"></pre>
 </div>
@@ -28,26 +31,26 @@ pre{background:#000;padding:10px;border-radius:6px;max-height:200px;overflow:aut
 <div class="box">
 <h3>API của m</h3>
 <button onclick="loadApis()">Load</button>
-<pre id="list"></pre>
+<div id="list"></div>
 </div>
 
 <div class="box">
 <h3>Settings API</h3>
-<input id="setName" placeholder="api name">
-<textarea id="setMap" placeholder='{"1":"t"}'></textarea>
+<input id="setID" placeholder="api id">
+<textarea id="setMap" placeholder="1 = a&#10;2 = b"></textarea>
 <input id="setTTL" placeholder="seconds vd 60">
 <button onclick="saveSet()">Save</button>
 </div>
 
 <div class="box">
 <h3>Check</h3>
-<input id="viewName" placeholder="api name">
+<input id="viewID" placeholder="api id">
 <button onclick="load()">Load</button>
 <pre id="out"></pre>
 </div>
 
 <div class="box" id="ownerBox" style="display:none">
-<h3>OWNER PANEL</h3>
+<h3>OWNER</h3>
 <button onclick="owner()">Load</button>
 <pre id="own"></pre>
 </div>
@@ -76,8 +79,8 @@ function saveAuth(tk, rl){
   role = rl
   localStorage.setItem("token", tk)
   localStorage.setItem("role", rl)
-
   if(role=="owner") ownerBox.style.display="block"
+  loadMe()
 }
 
 function logout(){
@@ -85,6 +88,13 @@ function logout(){
   token=""
   role=""
   ownerBox.style.display="none"
+  loadMe()
+}
+
+async function loadMe(){
+  let r=await fetch("/me",{headers:{authorization:token}})
+  let j=await r.json()
+  me.innerText = j.user ? j.user : j.guest
 }
 
 async function register(){
@@ -106,56 +116,60 @@ async function login(){
 }
 
 async function create(){
-  let name=document.getElementById("name").value
+  let name=name.value
 
-  let r=await fetch("/create",{method:"POST",headers:{'Content-Type':'application/json'},body:JSON.stringify({name})})
+  let r=await fetch("/create",{
+    method:"POST",
+    headers:{'Content-Type':'application/json',authorization:token},
+    body:JSON.stringify({name})
+  })
   let j=await r.json()
 
-  if(j.link){
-    let full = location.origin + j.link
+  if(j.id){
+    let full = location.origin + "/api/" + j.id
     link.innerHTML = `
 ${full}
 <button onclick="navigator.clipboard.writeText('${full}')">COPY</button>
 `
-  }else{
-    link.innerText = JSON.stringify(j)
-  }
+  }else link.innerText=JSON.stringify(j)
 }
 
 async function loadApis(){
-  let r=await fetch("/owner",{headers:{authorization:token}})
+  let r=await fetch("/my",{headers:{authorization:token}})
   let j=await r.json()
 
-  if(role=="owner"){
-    list.innerText = Object.keys(j.apis).join("\n")
-  }else{
-    list.innerText = "IP mode only (no list API)"
-  }
+  list.innerHTML=""
+  j.forEach(a=>{
+    let b=document.createElement("button")
+    b.className="apiBtn"
+    b.innerText = a.name+" | "+a.id
+    b.onclick=()=>{
+      setID.value=a.id
+      viewID.value=a.id
+    }
+    list.appendChild(b)
+  })
 }
 
 async function saveSet(){
-  let name=setName.value
-  let encodeMap
-
-  try{
-    encodeMap = JSON.parse(setMap.value||"{}")
-  }catch{
-    return alert("map lỗi")
-  }
-
-  let ttl = parseInt(setTTL.value)*1000
+  let id=setID.value
+  let ttl=parseInt(setTTL.value)*1000
 
   let r = await fetch("/settings",{
     method:"POST",
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name,encodeMap,ttl})
+    headers:{'Content-Type':'application/json',authorization:token},
+    body:JSON.stringify({
+      id,
+      encodeText:setMap.value,
+      ttl
+    })
   })
 
   alert(await r.text())
 }
 
 async function load(){
-  let n=viewName.value
+  let n=viewID.value
   let r=await fetch("/api/"+n)
   let j=await r.json()
   out.innerText=JSON.stringify(j,null,2)
@@ -167,8 +181,8 @@ async function owner(){
   own.innerText=JSON.stringify(j,null,2)
 }
 
-// auto load owner UI
 if(role=="owner") ownerBox.style.display="block"
+loadMe()
 </script>
 
 </body>
